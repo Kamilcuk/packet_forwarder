@@ -153,6 +153,7 @@ static bool gps_enabled = false; /* is GPS enabled on that gateway ? */
 static pthread_mutex_t mx_timeref = PTHREAD_MUTEX_INITIALIZER; /* control access to GPS time reference */
 static bool gps_ref_valid; /* is GPS reference acceptable (ie. not too old) */
 static struct tref time_reference_gps; /* time reference used for UTC <-> timestamp conversion */
+bool gps_pps_en; /* is pps signal enabled */
 
 /* Reference coordinates, for broadcasting (beacon) */
 static struct coord_s reference_coord;
@@ -733,6 +734,14 @@ static int parse_gateway_configuration(const char * conf_file) {
         MSG("INFO: GPS serial port path is configured to \"%s\"\n", gps_tty_path);
     }
 
+    val = json_object_get_value(conf_obj, "gps_pps_en");
+    if ( str != NULL ) {
+        gps_pps_en = (bool)json_value_get_boolean(val);
+        if ( !gps_pps_en ) {
+            MSG("INFO: GPS PPS signal disabled\n");
+        }
+    }
+
     /* get reference coordinates */
     val = json_object_get_value(conf_obj, "ref_latitude");
     if (val != NULL) {
@@ -1152,6 +1161,12 @@ int main(void)
 
     /* spawn thread to manage GPS */
     if (gps_enabled == true) {
+        if ( !gps_pps_en ) {
+            pthread_mutex_lock(&mx_concent);
+            lgw_reg_w(LGW_GPS_EN, 0);
+            pthread_mutex_unlock(&mx_concent);
+        }
+
         i = pthread_create( &thrid_gps, NULL, (void * (*)(void *))thread_gps, NULL);
         if (i != 0) {
             MSG("ERROR: [main] impossible to create GPS thread\n");
@@ -1520,7 +1535,17 @@ void thread_up(void) {
             /* Packet RX time (GPS based), 37 useful chars */
             if (ref_ok == true) {
                 /* convert packet timestamp to UTC absolute time */
-                j = lgw_cnt2utc(local_ref, p->count_us, &pkt_utc_time);
+                if ( gps_pps_en ) {
+                    j = lgw_cnt2utc(local_ref, p->count_us, &pkt_utc_time);
+                } else {
+                    /* Without the GPS PPS signal, the internal concentrator counter can't be trusted.
+                        We use system time. The system time should be synchronized with GPS time. */
+                    struct timeval  tv;
+                    gettimeofday(&tv, NULL);
+		    local_ref.xtal_err = 1;
+		    local_ref.count_us = 0;
+                    j = lgw_cnt2utc(local_ref, tv.tv_usec, &pkt_utc_time);
+                }
                 if (j == LGW_GPS_SUCCESS) {
                     /* split the UNIX timestamp to its calendar components */
                     x = gmtime(&(pkt_utc_time.tv_sec));

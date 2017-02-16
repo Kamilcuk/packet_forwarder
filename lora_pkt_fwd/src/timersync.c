@@ -54,6 +54,7 @@ static struct timeval offset_unix_concent = {0,0}; /* timer offset between unix 
 extern bool exit_sig;
 extern bool quit_sig;
 extern pthread_mutex_t mx_concent;
+extern bool gps_pps_en;
 
 /* -------------------------------------------------------------------------- */
 /* --- PUBLIC FUNCTIONS DEFINITION ------------------------------------------ */
@@ -128,10 +129,13 @@ void thread_timersync(void) {
             offset_unix_concent.tv_sec,
             offset_unix_concent.tv_usec,
             offset_drift.tv_sec * 1000000UL + offset_drift.tv_usec);
-        MSG("INFO: Enabling GPS mode for concentrator's counter.\n\n");
-        pthread_mutex_lock(&mx_concent); /* TODO: Is it necessary to protect here? */
-        lgw_reg_w(LGW_GPS_EN, 1);
-        pthread_mutex_unlock(&mx_concent);
+
+        if ( gps_pps_en ) {
+            MSG("INFO: Enabling GPS mode for concentrator's counter.\n\n");
+            pthread_mutex_lock(&mx_concent); /* TODO: Is it necessary to protect here? */
+            lgw_reg_w(LGW_GPS_EN, 1);
+            pthread_mutex_unlock(&mx_concent);
+        }
 
         /* delay next sync */
         /* If we consider a crystal oscillator precision of about 20ppm worst case, and a clock
